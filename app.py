@@ -5,19 +5,12 @@
 """
 
 import re
-import streamlit as st
 import os
-import httpx
-
-# 强行设置 HuggingFace 镜像和超时限制
+import streamlit as st
+# --- 核心修复：只使用最稳健的环境变量镜像 ---
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-os.environ["HTTPX_TIMEOUT"] = "300.0" # 延长超时时间到 5 分钟
-
-# 解决 client closed 报错的一个 Hack 技巧：预先初始化一个不带超时的客户端
-from huggingface_hub import configure_http_backend
-def backend_factory() -> httpx.Client:
-    return httpx.Client(timeout=300, verify=False)
-configure_http_backend(backend_factory)
+# 强制开启离线重试逻辑，但不使用复杂的 backend 配置
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = "./.model_cache"
 import sys
 import tempfile
 import traceback
@@ -35,7 +28,7 @@ from langchain_core.documents import Document
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_openai import ChatOpenAI
 
@@ -155,23 +148,17 @@ def extract_text_from_pdfs(uploaded_files: List) -> Tuple[List[Document], List[D
 def build_vector_store(_texts: List[str], _metadatas: List[Dict]) -> Chroma:
     """
     构建向量数据库并缓存
-    
-    Args:
-        _texts: 文本列表
-        _metadatas: 元数据列表
-        
-    Returns:
-        Chroma: 向量数据库实例
     """
     try:
-        # 初始化嵌入模型
+        # 1. 初始化嵌入模型 (材料准备)
+        # 建议确保文件顶部有: from langchain_huggingface import HuggingFaceEmbeddings
         embeddings = HuggingFaceEmbeddings(
             model_name="all-MiniLM-L6-v2",
             model_kwargs={'device': 'cpu'},
             encode_kwargs={'normalize_embeddings': True}
         )
-        
-        # 构建向量数据库
+
+        # 2. 构建向量数据库 (这是盖楼的过程，绝对不能删！)
         vector_store = Chroma.from_texts(
             texts=_texts,
             embedding=embeddings,
@@ -179,7 +166,14 @@ def build_vector_store(_texts: List[str], _metadatas: List[Dict]) -> Chroma:
             collection_name="deep_research_docs"
         )
         
+        # 3. 返回成果 (让后面的检索环节有东西可用)
         return vector_store
+        
+    except Exception as e:
+        # 4. 容错处理 (如果加载失败，告诉用户)
+        st.error(f"构建向量数据库时出错: {str(e)}")
+        # 这里不要抛出错误，而是返回 None，让主程序能优雅地展示错误
+        return None
         
     except Exception as e:
         st.error(f"构建向量数据库时出错: {str(e)}")

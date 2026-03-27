@@ -1,15 +1,8 @@
-streamlit>=1.28.0
-langchain>=0.1.0
-langchain-community>=0.0.10
-langchain-text-splitters>=0.1.0
-langchain-openai>=0.0.5
-chromadb>=0.4.18
-sentence-transformers>=2.2.2
-pypdf>=3.17.0
-openai>=1.12.0
-python-dotenv>=1.0.0
-tiktoken>=0.5.1
-streamlit-extras>=0.4.0
-torch>=2.0.0
-transformers>=4.33.0
-accelerate>=0.21.0
+streamlit>=1.30.0
+langchain>=0.2.0
+langchain-huggingface>=0.0.3
+langchain-openai
+chromadb
+sentence-transformers>=3.0.0  # 确保版本足够新
+huggingface_hub>=0.23.0       # 确保库版本包含我们需要的功能
+pypdf
