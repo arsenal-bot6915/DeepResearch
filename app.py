@@ -7,6 +7,17 @@
 import re
 import streamlit as st
 import os
+import httpx
+
+# 强行设置 HuggingFace 镜像和超时限制
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["HTTPX_TIMEOUT"] = "300.0" # 延长超时时间到 5 分钟
+
+# 解决 client closed 报错的一个 Hack 技巧：预先初始化一个不带超时的客户端
+from huggingface_hub import configure_http_backend
+def backend_factory() -> httpx.Client:
+    return httpx.Client(timeout=300, verify=False)
+configure_http_backend(backend_factory)
 import sys
 import tempfile
 import traceback
