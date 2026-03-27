@@ -7,10 +7,19 @@
 import re
 import streamlit as st
 import os
+# --- 注入代理隧道配置 ---
+proxy = 'http://127.0.0.1:7890' # 确保这里的端口和你加速器的端口一致
+os.environ['http_proxy'] = proxy
+os.environ['https_proxy'] = proxy
+
+# 如果你担心 SSL 证书报错（在使用代理时经常发生），可以加上这一行：
+os.environ['CURL_CA_BUNDLE'] = ''
 import sys
 import tempfile
 import traceback
 import uuid
+from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+from langchain_core.runnables import RunnableLambda
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -188,44 +197,78 @@ def initialize_rag_chain(vector_store: Chroma):
         )
         
         system_prompt = """
-        你是一个严谨的分析师与逻辑专家。你必须将分析结果封装在 HTML 的折叠标签中，以确保报告的整洁与专业。
+你是一位顶级的 AI 战略架构师与文献取证专家。你必须将分析结果以“三层嵌套折叠”的形式呈现，追求极致的证据透明度。
 
-        ### 📝 输出规范（必须严格执行）：
-        1. **核心摘要**：
-           在所有折叠框之前，先用一句话总结核心结论。
-        
-        2. **折叠框格式**：
-           每个主要章节必须使用以下格式：
-           <details>
-           <summary><b> [这里填入大标题，例如：📌 核心逻辑链路] </b></summary>
-           <br>
-           [这里填入详细的分析内容，必须包含精准引用，例如：[文献名，第 X 页]]
-           <br>
-           </details>
-        
-        3. **必填章节**：
-           - <details><summary><b> 🔗 逻辑链路 </b></summary>...</details>
-           - <details><summary><b> 🔹 分项深度解析 </b></summary>...</details>
-           - <details><summary><b> 💡 战略建议与结论 </b></summary>...</details>          
-        
-        4. **强制要求**：
-           - 每个 <details> 标签之间必须空两行。
-           - 严禁输出任何纯文本段落（除了开头的摘要）。
-            - 折叠框内的内容要保持精炼，使用列表（-）进行排版。        
-        
-        ### 检索到的原始文献上下文：
-        {context}
-        """
+### 🏗️ 结构化取证协议（强制执行）：
+
+1. **📌 核心洞察**：
+   开头用一句话提炼全局最核心结论。
+   `> 💡 系统提示：已通过 BGE-Reranker 精排引擎完成语义校对，当前展示 Top-5 最强关联证据。`
+
+2. **第一层：大章节折叠（Summary 级别）**：
+   使用 `<details><summary><b> [大标题，如：🔗 逻辑链路] </b></summary> ... </details>`
+
+3. **第二层：具体论点与匹配度（Claim 级别）**：
+   在大章节内部，每个论点使用嵌套折叠：
+   <details style="margin-left: 20px; border-left: 2px solid #007BFF; padding-left: 10px;">
+     <summary> 🔹 [具体论点标题] | <b> 语义匹配度：{{score}}% </b> </summary>
+     <br>
+     [这里是你的深度分析内容，逻辑要严密。]
+     
+     <!-- 第三层：原文证据块（Evidence 级别） -->
+     <details style="margin-left: 20px; background-color: #F9F9F9; border: 1px dashed #CCC; border-radius: 5px;">
+       <summary> 📄 查看文献原文证据 </summary>
+       <blockquote style="font-style: italic; color: #555;">
+         “ [这里请直接摘录该论点对应的、较为完整的文献原文片段，严禁修改原文文字] ”
+       </blockquote>
+       <p align="right"> —— <b> [文档名，第 X 页] </b> </p>
+     </details>
+     <br>
+   </details>
+
+4. **强制要求**：
+   - 严禁输出大段不带折叠的文字。
+   - 每一条分析，**必须**配对一个“原文证据”折叠框。
+   - 如果一段分析参考了多个片段，请在证据框内并列展示。
+
+### 检索到的原始文献上下文（已包含相关性评分）：
+{context}
+"""
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
             ("human", "{input}")
         ])
         
-        retriever = vector_store.as_retriever(
+        base_retriever = vector_store.as_retriever(
             search_type="similarity",
-            search_kwargs={"k": 8}
+            search_kwargs={"k": 15}
         )
+
+        cross_encoder = HuggingFaceCrossEncoder(model_name="BAAI/bge-reranker-base")
+
+        def custom_rerank(query: str):
+            docs = base_retriever.invoke(query)
+            if not docs: return []
+            
+            pairs = [[query, doc.page_content] for doc in docs]
+            scores = cross_encoder.score(pairs)
+            scored_docs = sorted(zip(docs, scores), key=lambda x: x[1], reverse=True)
+            
+            top_docs = []
+            for doc, score in scored_docs[:5]:
+                # --- 核心改进：分数量化逻辑 ---
+                # 将 BGE 的原始分数映射为一个直观的百分比（0-100%）
+                # 公式：1 / (1 + e^-x) 逻辑回归映射，确保显示美观
+                import math
+                confidence = 1 / (1 + math.exp(-score)) 
+                doc.metadata["score"] = round(confidence * 100, 1) # 转化为 98.5 这种格式
+                top_docs.append(doc)
+                
+            return top_docs
+
+        # 将我们手写的函数，转化为 LangChain 标准的流式节点！
+        smart_retriever = RunnableLambda(custom_rerank)        
         
         # 定义文档格式化函数
         def format_docs(docs):
@@ -248,7 +291,7 @@ def initialize_rag_chain(vector_store: Chroma):
         
         # 构建包含溯源信息的并行链 (LCEL 灵魂所在)
         rag_chain_with_source = RunnableParallel(
-            {"context": retriever, "input": RunnablePassthrough()}
+            {"context": smart_retriever, "input": RunnablePassthrough()}
         ).assign(answer=rag_chain_from_docs)
         
         return rag_chain_with_source
@@ -556,7 +599,7 @@ def main():
         
         # 页脚信息
         st.divider()
-        st.caption("© 2024 深研逻辑检索引擎 | 基于 Streamlit + LangChain + DeepSeek 构建")
+        st.caption("© 2026 深研逻辑检索引擎 | 基于 Streamlit + LangChain + DeepSeek 构建")
         
     except Exception as e:
         st.error(f"应用运行时出错: {str(e)}")
