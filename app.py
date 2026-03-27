@@ -7,13 +7,6 @@
 import re
 import streamlit as st
 import os
-# --- 注入代理隧道配置 ---
-proxy = 'http://127.0.0.1:7890' # 确保这里的端口和你加速器的端口一致
-os.environ['http_proxy'] = proxy
-os.environ['https_proxy'] = proxy
-
-# 如果你担心 SSL 证书报错（在使用代理时经常发生），可以加上这一行：
-os.environ['CURL_CA_BUNDLE'] = ''
 import sys
 import tempfile
 import traceback
