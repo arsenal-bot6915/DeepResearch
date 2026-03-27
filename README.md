@@ -25,3 +25,5 @@
 2. 安装依赖：`pip install -r requirements.txt`
 3. 配置秘密：在 `.streamlit/secrets.toml` 中填入你的 API Key 和 SMTP 授权码。
 4. 运行：`streamlit run app.py`
+
+线上 Demo 首次运行需加载精排模型，请耐心等待 5 分钟左右
